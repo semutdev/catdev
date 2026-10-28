@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>catdev: Docker dan tool dev modern di MacBook jadul</title>
+<meta name="description" content="catdev menjalankan Linux VM ringan di macOS Catalina lewat QEMU, supaya Docker, PHP, Node, MySQL, PostgreSQL, dan Claude Code tetap jalan di MacBook lama.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #E4E6E9;
+    --surface: #F3F4F5;
+    --ink: #22252A;
+    --ink-soft: #5B6168;
+    --line: #C6CACF;
+    --pcb: #1F5F45;
+    --pcb-edge: #164A35;
+    --chip: #1B1D20;
+    --gold: #C9A24A;
+    --lit: #E7A33A;
+    --link: #1F5F45;
+    --term-bg: #FFFFFF;
+    --term-bar: #E9EAEC;
+    --term-ink: #1E2024;
+    --term-dim: #6A7078;
+    --term-ok: #1F7A50;
+    --code-bg: #F3F4F5;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1E2124;
+      --surface: #272A2E;
+      --ink: #E6E8EB;
+      --ink-soft: #A0A6AE;
+      --line: #3A3F45;
+      --pcb: #24684C;
+      --pcb-edge: #1B513B;
+      --chip: #121416;
+      --gold: #D6B25C;
+      --lit: #F0AE48;
+      --link: #6CC59A;
+      --term-bg: #16181B;
+      --term-bar: #2C2F33;
+      --term-ink: #E4E6E9;
+      --term-dim: #8C939B;
+      --term-ok: #6CC59A;
+      --code-bg: #16181B;
+      color-scheme: dark;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Archivo", "Lucida Grande", "Helvetica Neue", Arial, sans-serif;
+    font-size: 17px;
+    line-height: 1.6;
+  }
+  a { color: var(--link); text-underline-offset: 3px; }
+  a:hover { text-decoration-thickness: 2px; }
+  :focus-visible { outline: 3px solid var(--lit); outline-offset: 3px; border-radius: 4px; }
+
+  code, pre, .mono { font-family: "IBM Plex Mono", Menlo, Monaco, monospace; }
+  p code, li code, td code {
+    font-size: 0.88em;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.05em 0.35em;
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  .prose { max-width: 660px; }
+
+  h1, h2, h3 {
+    font-stretch: 118%;
+    font-weight: 750;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  h1 { font-size: clamp(2.3rem, 5.4vw, 3.9rem); }
+  h2 { font-size: clamp(1.6rem, 3.2vw, 2.25rem); margin-bottom: 18px; }
+  h3 { font-size: 1.12rem; font-stretch: 110%; margin-bottom: 6px; }
+
+  section { padding: 76px 0; border-top: 1px solid var(--line); }
+
+  /* ---------- Hero ---------- */
+  .top {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 22px 0;
+  }
+  .brand { font-family: "IBM Plex Mono", Menlo, monospace; font-weight: 500; font-size: 1rem; color: var(--ink); text-decoration: none; }
+  .top nav a { margin-left: 22px; font-size: 0.95rem; color: var(--ink-soft); text-decoration: none; }
+  .top nav a:hover { color: var(--ink); }
+
+  .hero {
+    display: grid;
+    grid-template-columns: 1.05fr 1fr;
+    gap: 56px;
+    align-items: center;
+    padding: 56px 0 84px;
+  }
+  .hero p.lead { font-size: 1.18rem; color: var(--ink-soft); margin: 22px 0 30px; max-width: 34em; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn {
+    display: inline-block;
+    padding: 12px 20px;
+    border-radius: 7px;
+    font-weight: 650;
+    text-decoration: none;
+    font-size: 1rem;
+  }
+  .btn-main { background: var(--pcb); color: #F5F7F6; }
+  .btn-main:hover { background: var(--pcb-edge); }
+  .btn-alt { color: var(--ink); border: 1.5px solid var(--line); }
+  .btn-alt:hover { border-color: var(--ink-soft); }
+
+  /* Terminal window, gaya Terminal.app */
+  .term {
+    background: var(--term-bg);
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.4) inset, 0 22px 50px -24px rgba(20,25,30,0.45);
+    overflow: hidden;
+  }
+  .term-bar {
+    background: var(--term-bar);
+    border-bottom: 1px solid var(--line);
+    height: 30px;
+    display: flex; align-items: center; position: relative;
+    padding: 0 12px;
+  }
+  .lights { display: flex; gap: 8px; }
+  .lights span { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .lights span:nth-child(1) { background: #FF5F57; }
+  .lights span:nth-child(2) { background: #FEBC2E; }
+  .lights span:nth-child(3) { background: #28C840; }
+  .term-title { position: absolute; left: 0; right: 0; text-align: center; font-size: 0.8rem; color: var(--term-dim); pointer-events: none; }
+  .term pre {
+    margin: 0; padding: 18px 20px 20px;
+    font-size: 0.84rem; line-height: 1.65;
+    color: var(--term-ink);
+    overflow-x: auto;
+  }
+  .term .p { color: var(--term-dim); }
+  .term .ok { color: var(--term-ok); }
+  .term .dim { color: var(--term-dim); }
+
+  /* ---------- Masalah ---------- */
+  .broken { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 48px; margin-top: 28px; max-width: 900px; }
+  .broken div { padding: 16px 0; border-top: 1px solid var(--line); }
+  .broken p { margin: 0; color: var(--ink-soft); }
+
+  /* ---------- RAM ---------- */
+  .ram-rows { margin-top: 36px; display: grid; gap: 40px; }
+  .ram-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 12px; }
+  .ram-head .name { font-weight: 650; font-size: 1.05rem; }
+  .ram-head .val { font-stretch: 125%; font-weight: 800; font-size: clamp(1.6rem, 3.4vw, 2.3rem); font-variant-numeric: tabular-nums; }
+  .sticks { display: flex; flex-wrap: wrap; gap: 34px 14px; padding-bottom: 22px; }
+  .stick {
+    flex: 1 1 380px;
+    background: var(--pcb);
+    border: 1px solid var(--pcb-edge);
+    border-radius: 3px;
+    padding: 10px 10px 0;
+    position: relative;
+  }
+  .chips { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+  .chip {
+    height: 34px;
+    background: var(--chip);
+    border-radius: 2px;
+    position: relative;
+    overflow: hidden;
+  }
+  .chip i {
+    position: absolute; inset: 0 auto 0 0;
+    width: 0;
+    background: var(--lit);
+    transition: width 0.35s ease-out;
+  }
+  .ram-rows.on .chip i { width: var(--f, 0%); }
+  .pins {
+    height: 14px; margin: 10px -10px 0;
+    background: repeating-linear-gradient(90deg, var(--gold) 0 5px, transparent 5px 8px);
+    border-top: 1px solid var(--pcb-edge);
+    position: relative;
+  }
+  .pins::after {
+    content: ""; position: absolute; bottom: 0; left: 38%;
+    width: 10px; height: 10px; background: var(--bg);
+  }
+  .stick-label { position: absolute; top: calc(100% + 6px); left: 1px; font-size: 0.78rem; color: var(--ink-soft); }
+  .ram-note { margin-top: 26px; font-size: 0.95rem; color: var(--ink-soft); max-width: 660px; }
+
+  /* ---------- Cara kerja ---------- */
+  .layers { margin-top: 30px; max-width: 820px; }
+  .layer { border: 1.5px solid var(--line); border-radius: 10px; padding: 18px 20px 20px; background: var(--surface); }
+  .layer .layer { margin-top: 16px; background: var(--bg); border-radius: 8px; }
+  .layer .layer .layer { background: var(--surface); border-color: var(--pcb); border-width: 2px; border-radius: 6px; }
+  .layer-name { font-weight: 700; font-stretch: 112%; }
+  .layer-desc { color: var(--ink-soft); font-size: 0.95rem; margin: 2px 0 0; }
+  .ports { margin: 12px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 0.88rem; }
+  .ports code { font-size: 0.85rem; }
+  .inside { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .inside span { border: 1px solid var(--line); border-radius: 5px; padding: 4px 10px; font-size: 0.92rem; background: var(--bg); }
+
+  /* ---------- Persiapan & instalasi ---------- */
+  .needs { margin: 22px 0 0; padding: 0; list-style: none; max-width: 760px; }
+  .needs li { padding: 12px 0 12px 30px; border-top: 1px solid var(--line); position: relative; }
+  .needs li::before {
+    content: ""; position: absolute; left: 2px; top: 19px;
+    width: 12px; height: 12px; border: 2px solid var(--pcb); border-radius: 3px;
+  }
+  .needs li span { color: var(--ink-soft); }
+
+  .steps { counter-reset: s; margin: 30px 0 0; padding: 0; list-style: none; max-width: 760px; }
+  .steps > li { counter-increment: s; position: relative; padding: 0 0 34px 56px; }
+  .steps > li::before {
+    content: counter(s);
+    position: absolute; left: 0; top: -4px;
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 2px solid var(--pcb); color: var(--pcb);
+    font-weight: 800; font-stretch: 120%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  @media (prefers-color-scheme: dark) { .steps > li::before { color: var(--link); border-color: var(--link); } }
+  .steps > li::after {
+    content: ""; position: absolute; left: 18px; top: 38px; bottom: 6px;
+    width: 2px; background: var(--line);
+  }
+  .steps > li:last-child::after { display: none; }
+  .steps p { margin: 4px 0 0; color: var(--ink-soft); }
+
+  .code {
+    position: relative;
+    margin-top: 12px;
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+  }
+  .code pre { margin: 0; padding: 14px 16px; padding-right: 76px; overflow-x: auto; font-size: 0.86rem; line-height: 1.6; }
+  .copy {
+    position: absolute; top: 8px; right: 8px;
+    font: 600 0.78rem "Archivo", sans-serif;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 5px;
+    padding: 5px 10px; cursor: pointer;
+  }
+  .copy:hover { border-color: var(--ink-soft); }
+  .copy.done { color: var(--term-ok); border-color: var(--term-ok); }
+
+  /* ---------- Pemakaian ---------- */
+  .table-wrap { overflow-x: auto; margin-top: 22px; max-width: 760px; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 12px 14px 12px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  td:first-child { white-space: nowrap; width: 1%; padding-right: 28px; }
+  tr:last-child td { border-bottom: 1px solid var(--line); }
+
+  .tips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin-top: 44px; }
+  .tips p { margin: 0; color: var(--ink-soft); font-size: 0.97rem; }
+
+  .limits { margin: 18px 0 0; padding-left: 20px; max-width: 700px; }
+  .limits li { margin-bottom: 10px; }
+
+  footer { border-top: 1px solid var(--line); padding: 40px 0 56px; color: var(--ink-soft); font-size: 0.95rem; }
+  footer .row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 18px; }
+  footer p { margin: 0 0 6px; }
+
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; gap: 40px; padding-top: 28px; }
+    .tips { grid-template-columns: 1fr; gap: 24px; }
+  }
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    section { padding: 56px 0; }
+    .top nav a:not(:last-child) { display: none; }
+    .broken { grid-template-columns: 1fr; }
+    .steps > li { padding-left: 48px; }
+    .chip { height: 26px; }
+    .chips { gap: 4px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chip i { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="#">catdev</a>
+    <nav>
+      <a href="#cara-kerja">Cara kerja</a>
+      <a href="#pasang">Pasang</a>
+      <a href="https://github.com/semutdev/catdev">GitHub</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <div>
+      <h1>Docker, PHP, Node, dan Claude Code di MacBook 2012.</h1>
+      <p class="lead">catdev menjalankan Linux VM ringan di macOS Catalina lewat QEMU. Tanpa ganti OS, tanpa patch macOS, dan tanpa Docker Desktop.</p>
+      <div class="actions">
+        <a class="btn btn-main" href="#pasang">Cara pasang</a>
+        <a class="btn btn-alt" href="https://github.com/semutdev/catdev">Lihat di GitHub</a>
+      </div>
+    </div>
+
+    <div class="term" role="img" aria-label="Contoh terminal: catdev up menyalakan VM, Docker hello-world berhasil, dan catdev status menunjukkan VM memakai 1160 MB RAM di Mac.">
+      <div class="term-bar">
+        <div class="lights" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="term-title">Terminal</div>
+      </div>
+<pre><span class="p">~ ▶</span> catdev up
+→ Menunggu SSH...... ok
+→ Menunggu setup selesai…
+<span class="ok">✓ VM siap.</span> Masuk dengan: catdev ssh
+
+<span class="p">~ ▶</span> catdev ssh docker run --rm hello-world
+<span class="ok">Hello from Docker!</span>
+<span class="dim">This message shows that your installation
+appears to be working correctly.</span>
+
+<span class="p">~ ▶</span> catdev status
+VM jalan (pid 94365), RSS di Mac: <span class="ok">1160 MB</span></pre>
+    </div>
+  </div>
+</div>
+
+<section>
+  <div class="wrap">
+    <div class="prose">
+      <h2>MacBook-nya masih kuat, tool-nya yang pergi duluan</h2>
+      <p>Banyak MacBook Intel lama berhenti di macOS Catalina. Hardware-nya masih layak untuk ngoding, apalagi kalau RAM sudah di-upgrade, tapi satu per satu tool developer berhenti mendukungnya.</p>
+    </div>
+    <div class="broken">
+      <div><h3>Docker Desktop</h3><p>Versi yang masih jalan di Catalina sudah lama ditinggal.</p></div>
+      <div><h3>Homebrew</h3><p>Catalina tidak lagi didukung, banyak paket harus dikompilasi sendiri.</p></div>
+      <div><h3>Editor dan aplikasi Electron baru</h3><p>Sebagian besar sekarang butuh minimal macOS 11.</p></div>
+      <div><h3>Multipass</h3><p>Jalan, tapi berat. Di MacBook Pro 2012 bisa memakan sekitar 7 GB RAM dan bikin laptop lag.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="prose">
+      <h2>Dari 7 GB jadi 1,1 GB</h2>
+      <p>Setiap chip di bawah ini mewakili 1 GB dari RAM 16 GB (2 × 8 GB) di MacBook Pro 2012. Yang menyala adalah RAM yang dipakai VM, dilihat dari sisi Mac.</p>
+    </div>
+
+    <div class="ram-rows" id="ram">
+      <div>
+        <div class="ram-head"><span class="name">Multipass</span><span class="val">± 7 GB</span></div>
+        <div class="sticks" data-gb="7"></div>
+      </div>
+      <div>
+        <div class="ram-head"><span class="name">catdev</span><span class="val">1,1 GB</span></div>
+        <div class="sticks" data-gb="1.1"></div>
+      </div>
+    </div>
+
+    <p class="ram-note">Diukur di MacBook Pro 2012 dengan RAM 16 GB dan macOS Catalina, setelah VM selesai boot. Saat dipakai kerja, catdev bisa naik sampai batas <code>VM_MEM</code> (default 3 GB) dan tidak lebih.</p>
+  </div>
+</section>
+
+<section id="cara-kerja">
+  <div class="wrap">
+    <div class="prose">
+      <h2>Cara kerjanya</h2>
+      <p>Docker butuh kernel Linux, jadi catdev menyalakan Debian 13 minimal di dalam QEMU. Prosesor Intel menjalankan VM-nya langsung lewat Hypervisor.framework bawaan macOS, sehingga kecepatannya mendekati native. Kamu tetap kerja dari Terminal, VS Code, dan browser di Mac seperti biasa.</p>
+    </div>
+
+    <div class="layers">
+      <div class="layer">
+        <div class="layer-name">MacBook dengan macOS Catalina</div>
+        <p class="layer-desc">Terminal, VS Code Remote-SSH, dan browser</p>
+        <ul class="ports">
+          <li><code>localhost:2222</code> ke SSH di VM</li>
+          <li><code>localhost:8000</code>, <code>:5173</code>, <code>:3000</code> ke aplikasimu</li>
+        </ul>
+        <div class="layer">
+          <div class="layer-name">QEMU dengan akselerasi HVF</div>
+          <p class="layer-desc">Proses ringan di Mac. RAM dan CPU-nya dibatasi lewat <code>VM_MEM</code> dan <code>VM_CPUS</code>.</p>
+          <div class="layer">
+            <div class="layer-name">Debian 13 VM</div>
+            <div class="inside">
+              <span>Docker</span>
+              <span>MySQL</span>
+              <span>PostgreSQL</span>
+              <span>PHP versi apa pun lewat container</span>
+              <span>Node.js</span>
+              <span>Claude Code</span>
+              <span>tmux</span>
+              <span>zram</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="pasang">
+  <div class="wrap">
+    <div class="prose">
+      <h2>Yang perlu disiapkan</h2>
+      <p>Cukup sekali di awal. Setelah itu yang dipakai sehari-hari hanya perintah <code>catdev</code>.</p>
+    </div>
+    <ul class="needs">
+      <li>Mac Intel yang mendukung virtualisasi. <span>Cek dengan <code>sysctl kern.hv_support</code>, hasilnya harus <code>1</code>.</span></li>
+      <li>Xcode Command Line Tools. <span>Dibutuhkan MacPorts untuk membangun paket.</span></li>
+      <li>MacPorts. <span>Lebih bersahabat dengan macOS lama dibanding Homebrew.</span></li>
+      <li>QEMU dari MacPorts.</li>
+      <li>SSH key di <code>~/.ssh/id_ed25519.pub</code>.</li>
+      <li>Ruang disk kosong sekitar 10 GB untuk mulai.</li>
+    </ul>
+
+    <h2 style="margin-top:64px">Pasang</h2>
+    <ol class="steps">
+      <li>
+        <h3>Pasang Xcode Command Line Tools</h3>
+        <div class="code"><button class="copy" type="button">Salin</button><pre>xcode-select --install</pre></div>
+        <p>Kalau muncul pesan tidak tersedia, unduh “Command Line Tools for Xcode 12.4” dari <a href="https://developer.apple.com/download/all/">developer.apple.com</a> dan pasang manual.</p>
+      </li>
+      <li>
+        <h3>Pasang MacPorts</h3>
+        <p>Unduh installer untuk macOS Catalina dari <a href="https://www.macports.org/install.php">macports.org</a>, lalu jalankan seperti aplikasi biasa.</p>
+      </li>
+      <li>
+        <h3>Pasang QEMU</h3>
+        <div class="code"><button class="copy" type="button">Salin</button><pre>sudo port selfupdate
+sudo port -b install qemu || sudo port install qemu
+qemu-system-x86_64 -accel help</pre></div>
+        <p>Pastikan <code>hvf</code> muncul di daftar. Kalau QEMU harus dikompilasi dari source, prosesnya bisa satu jam atau lebih. Colokkan charger dan biarkan jalan.</p>
+      </li>
+      <li>
+        <h3>Pasang catdev</h3>
+        <div class="code"><button class="copy" type="button">Salin</button><pre>mkdir -p ~/bin
+curl -fsSL https://raw.githubusercontent.com/semutdev/catdev/main/catdev -o ~/bin/catdev
+chmod +x ~/bin/catdev
+echo 'export PATH="$HOME/bin:$PATH"' &gt;&gt; ~/.zshrc &amp;&amp; source ~/.zshrc</pre></div>
+      </li>
+      <li>
+        <h3>Buat dan nyalakan VM</h3>
+        <div class="code"><button class="copy" type="button">Salin</button><pre>[ -f ~/.ssh/id_ed25519.pub ] || ssh-keygen -t ed25519
+catdev init
+catdev up</pre></div>
+        <p>Boot pertama makan waktu beberapa menit karena Docker sedang dipasang di dalam VM. Tunggu sampai muncul “VM siap”.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Pemakaian harian</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><td><code>catdev up</code></td><td>Nyalakan VM.</td></tr>
+        <tr><td><code>catdev ssh</code></td><td>Masuk ke VM, atau jalankan satu perintah: <code>catdev ssh docker ps</code>.</td></tr>
+        <tr><td><code>catdev status</code></td><td>Lihat RAM yang dipakai VM dan container yang sedang jalan.</td></tr>
+        <tr><td><code>catdev down</code></td><td>Matikan VM dengan rapi. Lakukan sebelum mematikan Mac.</td></tr>
+      </table>
+    </div>
+    <p style="max-width:660px;color:var(--ink-soft);margin-top:18px">RAM, CPU, dan port diatur lewat environment variable, misalnya <code>export VM_MEM=4096</code> atau <code>export FWD_PORTS="3000 5173 8000 8080"</code> di <code>~/.zshrc</code>. Perubahan berlaku setelah <code>catdev down</code> lalu <code>catdev up</code>.</p>
+
+    <div class="tips">
+      <div>
+        <h3>Simpan kode di dalam VM</h3>
+        <p>Jalankan <code>git clone</code> di VM, jangan mount folder dari Mac. Docker, npm, composer, dan Claude Code jadi jauh lebih cepat karena membaca disk VM langsung.</p>
+      </div>
+      <div>
+        <h3>Edit dengan VS Code Remote-SSH</h3>
+        <p>Tambahkan host <code>127.0.0.1</code> port <code>2222</code> user <code>dev</code> ke <code>~/.ssh/config</code>. Editor di Mac, semua prosesnya jalan di VM.</p>
+      </div>
+      <div>
+        <h3>Pakai tmux untuk sesi panjang</h3>
+        <p><code>catdev ssh tmux new -A -s main</code> membuat sesi yang tetap hidup saat terminal ditutup, cocok untuk Claude Code dan dev server.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="prose">
+      <h2>Batasan yang perlu kamu tahu</h2>
+    </div>
+    <ul class="limits">
+      <li>Hanya untuk Mac Intel. Mac Apple Silicon dengan macOS baru punya pilihan yang lebih baik.</li>
+      <li>RAM yang sudah dipakai VM baru kembali ke Mac setelah <code>catdev down</code>. Atur batasnya dengan <code>VM_MEM</code>.</li>
+      <li>Mematikan Mac saat VM menyala sama seperti mencabut listrik VM. Biasakan <code>catdev down</code> dulu.</li>
+      <li>Port yang diteruskan ditentukan saat <code>catdev up</code>. Tambah port berarti restart VM.</li>
+      <li>Baru diuji di MacBook Pro 2012 dengan macOS Catalina. Kalau kamu mencoba di Mac lain, kabari hasilnya lewat GitHub Issues.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap row">
+    <div>
+      <p>Dibuat oleh <a href="https://www.threads.com/@semutdev">@semutdev</a> untuk teman-teman yang masih setia dengan MacBook lama.</p>
+      <p>catdev hanya menyatukan <a href="https://www.qemu.org/">QEMU</a>, <a href="https://cloud.debian.org/images/cloud/">Debian cloud image</a>, dan <a href="https://cloud-init.io/">cloud-init</a>.</p>
+    </div>
+    <div>
+      <p><a href="https://github.com/semutdev/catdev">github.com/semutdev/catdev</a></p>
+      <p>Lisensi MIT</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Bangun dua stik RAM (2 × 8 GB) untuk setiap baris
+  document.querySelectorAll('.sticks').forEach(function (row) {
+    var gb = parseFloat(row.dataset.gb);
+    var order = 0;
+    for (var s = 0; s < 2; s++) {
+      var stick = document.createElement('div');
+      stick.className = 'stick';
+      stick.setAttribute('aria-hidden', 'true');
+      var label = document.createElement('span');
+      label.className = 'stick-label';
+      label.textContent = '8 GB DDR3';
+      var chips = document.createElement('div');
+      chips.className = 'chips';
+      for (var c = 0; c < 8; c++) {
+        var chip = document.createElement('div');
+        chip.className = 'chip';
+        var fill = document.createElement('i');
+        var amount = Math.max(0, Math.min(1, gb - order));
+        fill.style.setProperty('--f', (amount * 100) + '%');
+        fill.style.transitionDelay = (order * 0.09) + 's';
+        chip.appendChild(fill);
+        chips.appendChild(chip);
+        order++;
+      }
+      var pins = document.createElement('div');
+      pins.className = 'pins';
+      stick.appendChild(label);
+      stick.appendChild(chips);
+      stick.appendChild(pins);
+      row.appendChild(stick);
+    }
+  });
+
+  // Nyalakan chip saat bagian RAM terlihat
+  var ram = document.getElementById('ram');
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { ram.classList.add('on'); io.disconnect(); }
+      });
+    }, { threshold: 0.35 });
+    io.observe(ram);
+  } else {
+    ram.classList.add('on');
+  }
+
+  // Tombol salin
+  document.querySelectorAll('.copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var text = btn.parentElement.querySelector('pre').innerText;
+      var done = function () {
+        btn.textContent = 'Tersalin';
+        btn.classList.add('done');
+        setTimeout(function () { btn.textContent = 'Salin'; btn.classList.remove('done'); }, 1600);
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done);
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); done(); } catch (err) {}
+        document.body.removeChild(ta);
+      }
+    });
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# catdev — MVP: VM Linux ringan untuk development di macOS Catalina
+# QEMU + Hypervisor.framework (HVF), Debian 13 genericcloud, tanpa mount.
+# Kompatibel dengan bash 3.2 bawaan macOS.
+set -euo pipefail
+
+CATDEV_HOME="${CATDEV_HOME:-$HOME/.catdev}"
+VM_CPUS="${VM_CPUS:-2}"
+VM_MEM="${VM_MEM:-3072}"            # MB
+VM_DISK_SIZE="${VM_DISK_SIZE:-40G}"
+SSH_PORT="${SSH_PORT:-2222}"
+FWD_PORTS="${FWD_PORTS:-3000 5173 8000 8080}"
+IMAGE_URL="${IMAGE_URL:-https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2}"
+SSH_PUBKEY="${SSH_PUBKEY:-$HOME/.ssh/id_ed25519.pub}"
+
+BASE="$CATDEV_HOME/base.qcow2"
+DISK="$CATDEV_HOME/disk.qcow2"
+SEED="$CATDEV_HOME/seed.iso"
+PIDFILE="$CATDEV_HOME/vm.pid"
+LOG="$CATDEV_HOME/serial.log"
+
+SSH_OPTS=(-q -p "$SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+          -o ConnectTimeout=3 -o LogLevel=ERROR -A)
+
+die() { echo "catdev: $*" >&2; exit 1; }
+is_running() {
+  [[ -f "$PIDFILE" ]] || return 1
+  ps -p "$(cat "$PIDFILE")" -o comm= 2>/dev/null | grep -q qemu-system
+}
+ssh_cmd() { ssh "${SSH_OPTS[@]}" dev@127.0.0.1 "$@"; }
+
+cmd_init() {
+  command -v qemu-system-x86_64 >/dev/null || die "QEMU belum terpasang (coba: sudo port install qemu)"
+  [[ -f "$SSH_PUBKEY" ]] || die "SSH key tidak ada di $SSH_PUBKEY (buat dengan: ssh-keygen -t ed25519)"
+  [[ "$(sysctl -n kern.hv_support 2>/dev/null)" == "1" ]] || die "Hypervisor.framework tidak tersedia di Mac ini"
+  [[ -f "$DISK" ]] && die "VM sudah ada. Hapus $CATDEV_HOME untuk mulai ulang."
+  mkdir -p "$CATDEV_HOME/seed"
+
+  if [[ ! -f "$BASE" ]]; then
+    echo "→ Mengunduh image Debian…"
+    curl -fL --progress-bar -o "$BASE" "$IMAGE_URL"
+  fi
+  cp "$BASE" "$DISK"
+  qemu-img resize -q "$DISK" "$VM_DISK_SIZE"
+
+  cat > "$CATDEV_HOME/seed/meta-data" <<EOF
+instance-id: catdev-01
+local-hostname: catdev
+EOF
+
+  cat > "$CATDEV_HOME/seed/user-data" <<EOF
+#cloud-config
+users:
+  - name: dev
+    groups: [sudo]
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - $(cat "$SSH_PUBKEY")
+package_update: true
+packages: [git, curl, ca-certificates, htop, zram-tools]
+runcmd:
+  - curl -fsSL https://get.docker.com | sh
+  - usermod -aG docker dev
+  - printf 'ALGO=zstd\nPERCENT=50\n' > /etc/default/zramswap
+  - systemctl restart zramswap
+EOF
+
+  rm -f "$SEED"
+  hdiutil makehybrid -quiet -o "$SEED" -iso -joliet -default-volume-name cidata "$CATDEV_HOME/seed"
+  echo "✓ VM siap dibuat. Jalankan: catdev up  (boot pertama butuh beberapa menit)"
+}
+
+cmd_up() {
+  [[ -f "$DISK" ]] || die "VM belum dibuat. Jalankan: catdev init"
+  if is_running; then echo "VM sudah jalan."; return; fi
+
+  local fwd="hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22"
+  for p in $FWD_PORTS; do fwd="${fwd},hostfwd=tcp:127.0.0.1:${p}-:${p}"; done
+
+  qemu-system-x86_64 \
+    -machine q35,accel=hvf -cpu host \
+    -smp "$VM_CPUS" -m "$VM_MEM" \
+    -drive "file=$DISK,if=virtio,cache=writeback,discard=unmap" \
+    -cdrom "$SEED" \
+    -netdev "user,id=net0,${fwd}" -device virtio-net-pci,netdev=net0 \
+    -device virtio-balloon-pci,free-page-reporting=on \
+    -device virtio-rng-pci \
+    -display none -serial "file:$LOG" \
+    -daemonize -pidfile "$PIDFILE"
+
+  printf "→ Menunggu SSH"
+  for _ in $(seq 1 120); do
+    if ssh_cmd true 2>/dev/null; then
+      echo " ok"
+      echo "→ Menunggu setup selesai…"
+      ssh_cmd "cloud-init status --wait >/dev/null" || true
+      echo "✓ VM siap. Masuk dengan: catdev ssh"
+      return
+    fi
+    printf "."; sleep 2
+  done
+  echo; die "SSH belum merespons. Cek log: $LOG"
+}
+
+cmd_down() {
+  if ! is_running; then echo "VM tidak jalan."; return; fi
+  ssh_cmd "sudo poweroff" 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    if ! is_running; then rm -f "$PIDFILE"; echo "✓ VM mati."; return; fi
+    sleep 1
+  done
+  kill "$(cat "$PIDFILE")" 2>/dev/null || true
+  rm -f "$PIDFILE"; echo "VM dimatikan paksa."
+}
+
+cmd_status() {
+  if is_running; then
+    echo "VM jalan (pid $(cat "$PIDFILE")), RSS di Mac: $(ps -o rss= -p "$(cat "$PIDFILE")" | awk '{printf "%.0f MB", $1/1024}')"
+    ssh_cmd 'echo; free -h | sed -n 1,3p; echo; docker ps --format "table {{.Names}}\t{{.Status}}" 2>/dev/null' || true
+  else
+    echo "VM tidak jalan."
+  fi
+}
+
+case "${1:-help}" in
+  init)   cmd_init ;;
+  up)     cmd_up ;;
+  down)   cmd_down ;;
+  status) cmd_status ;;
+  ssh)    shift; ssh "${SSH_OPTS[@]}" -t dev@127.0.0.1 "$@" ;;
+  *)
+    cat <<EOF
+catdev — VM dev ringan untuk macOS Catalina
+
+  catdev init     unduh image & siapkan VM (sekali saja)
+  catdev up       nyalakan VM
+  catdev down     matikan VM
+  catdev ssh      masuk ke VM (atau: catdev ssh <perintah>)
+  catdev status   cek RAM VM & container
+
+Atur lewat env: VM_CPUS=$VM_CPUS VM_MEM=$VM_MEM FWD_PORTS="$FWD_PORTS"
+EOF
+    ;;
+esac
